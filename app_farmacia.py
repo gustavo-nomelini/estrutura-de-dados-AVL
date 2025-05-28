@@ -321,17 +321,17 @@ def get_cached_medicamentos():
     return st.session_state.sistema.listar_todos()
 
 @st.cache_data(ttl=300)
-def get_estoque_critico(medicamentos, limite=5):
+def get_estoque_critico(_medicamentos, limite=5):
     """Get medications with critical stock levels"""
-    return [med for med in medicamentos if med.quantidade < limite]
+    return [med for med in _medicamentos if med.quantidade < limite]
 
 @st.cache_data(ttl=300)
-def get_estoque_statistics(medicamentos):
+def get_estoque_statistics(_medicamentos):
     """Calculate stock statistics"""
-    total_estoque = sum(med.quantidade for med in medicamentos)
-    valor_total = sum(med.preco * med.quantidade for med in medicamentos)
-    estoque_baixo = sum(1 for med in medicamentos if med.quantidade < 10)
-    estoque_critico = sum(1 for med in medicamentos if med.quantidade < 5)
+    total_estoque = sum(med.quantidade for med in _medicamentos)
+    valor_total = sum(med.preco * med.quantidade for med in _medicamentos)
+    estoque_baixo = sum(1 for med in _medicamentos if med.quantidade < 10)
+    estoque_critico = sum(1 for med in _medicamentos if med.quantidade < 5)
     return total_estoque, valor_total, estoque_baixo, estoque_critico
 
 def mostrar_dashboard():
