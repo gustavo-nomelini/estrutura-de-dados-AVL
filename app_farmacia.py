@@ -9,12 +9,39 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 import altair as alt
+import locale
 
 # Aumenta o limite de células renderizáveis pelo Pandas Styler
 pd.set_option("styler.render.max_elements", 500000)
 
 # Importe a implementação da Árvore AVL
 from sistema_farmacia_avl import ArvoreAVL, Medicamento, NoAVL, formatar_moeda, simular_busca_lista_encadeada
+
+# Configuração adicional de locale para formatação de números
+try:
+    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+except locale.Error:
+    try:
+        locale.setlocale(locale.LC_ALL, 'Portuguese_Brazil.1252')
+    except locale.Error:
+        pass
+
+# Funções auxiliares de formatação
+def formatar_numero(valor):
+    """Formata números grandes com separadores de milhar."""
+    try:
+        return locale.format_string("%d", valor, grouping=True)
+    except:
+        # Fallback para formatação manual
+        return f"{valor:,}".replace(",", ".")
+
+def formatar_decimal(valor, precisao=2):
+    """Formata números decimais com separadores de milhar e casas decimais."""
+    try:
+        return locale.format_string(f"%.{precisao}f", valor, grouping=True)
+    except:
+        # Fallback para formatação manual
+        return f"{valor:,.{precisao}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 # Configuração do banco de dados SQLite
@@ -308,7 +335,7 @@ def mostrar_dashboard():
     with col1:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">{len(medicamentos)}</div>
+            <div class="metric-value">{formatar_numero(len(medicamentos))}</div>
             <div class="metric-label">Medicamentos Cadastrados</div>
         </div>
         """, unsafe_allow_html=True)
@@ -316,7 +343,7 @@ def mostrar_dashboard():
     with col2:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">{total_estoque}</div>
+            <div class="metric-value">{formatar_numero(total_estoque)}</div>
             <div class="metric-label">Itens em Estoque</div>
         </div>
         """, unsafe_allow_html=True)
@@ -332,7 +359,7 @@ def mostrar_dashboard():
     with col4:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value" style="color: {'red' if estoque_critico > 0 else 'green'};">{estoque_critico}</div>
+            <div class="metric-value" style="color: {'red' if estoque_critico > 0 else 'green'};">{formatar_numero(estoque_critico)}</div>
             <div class="metric-label">Itens com Estoque Crítico</div>
         </div>
         """, unsafe_allow_html=True)
@@ -376,12 +403,18 @@ def mostrar_dashboard():
             cat_count = df['categoria'].value_counts().reset_index()
             cat_count.columns = ['Categoria', 'Quantidade']
             
+            # Adiciona formatação para tooltips
+            cat_count['Qtd_Formatada'] = cat_count['Quantidade'].apply(formatar_numero)
+            
             # Gráfico com Altair
             chart = alt.Chart(cat_count).mark_bar().encode(
                 x=alt.X('Categoria:N', sort='-y'),
                 y='Quantidade:Q',
                 color=alt.Color('Categoria:N', legend=None),
-                tooltip=['Categoria', 'Quantidade']
+                tooltip=[
+                    alt.Tooltip('Categoria:N', title='Categoria'),
+                    alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
+                ]
             ).properties(
                 title='Medicamentos por Categoria',
                 height=300
@@ -409,6 +442,9 @@ def mostrar_dashboard():
             estoque_dist = df['estoque_cat'].value_counts().reset_index()
             estoque_dist.columns = ['Categoria', 'Quantidade']
             
+            # Adiciona formatação para tooltips
+            estoque_dist['Qtd_Formatada'] = estoque_dist['Quantidade'].apply(formatar_numero)
+            
             # Ordem personalizada para as categorias
             ordem = ['Crítico (<5)', 'Baixo (5-9)', 'Moderado (10-19)', 'Bom (20-49)', 'Ótimo (50+)']
             estoque_dist['Categoria'] = pd.Categorical(estoque_dist['Categoria'], 
@@ -424,7 +460,10 @@ def mostrar_dashboard():
                 x=alt.X('Categoria:N', sort=ordem),
                 y='Quantidade:Q',
                 color=alt.Color('Categoria:N', scale=alt.Scale(domain=ordem, range=cores)),
-                tooltip=['Categoria', 'Quantidade']
+                tooltip=[
+                    alt.Tooltip('Categoria:N', title='Nível de Estoque'),
+                    alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
+                ]
             ).properties(
                 title='Distribuição de Níveis de Estoque',
                 height=300
@@ -442,16 +481,17 @@ def mostrar_dashboard():
             valor_por_cat = valor_por_cat.sort_values('Valor Total', ascending=False)
             
             # Adicionar formatação de moeda
-            valor_por_cat['Valor Formatado'] = valor_por_cat['Valor Total'].apply(
-                lambda x: f"R$ {x:.2f}"
-            )
+            valor_por_cat['Valor Formatado'] = valor_por_cat['Valor Total'].apply(formatar_moeda)
             
             # Gráfico com Altair
             chart = alt.Chart(valor_por_cat).mark_bar().encode(
                 x=alt.X('Categoria:N', sort='-y'),
-                y=alt.Y('Valor Total:Q', axis=alt.Axis(format='$,.2f')),
+                y=alt.Y('Valor Total:Q', axis=alt.Axis(format='~s', title='Valor Total (R$)')),
                 color=alt.Color('Categoria:N', legend=None),
-                tooltip=['Categoria', 'Valor Formatado']
+                tooltip=[
+                    alt.Tooltip('Categoria:N', title='Categoria'),
+                    alt.Tooltip('Valor Formatado:N', title='Valor em Estoque')
+                ]
             ).properties(
                 title='Valor Total em Estoque por Categoria',
                 height=300
@@ -933,10 +973,10 @@ def mostrar_visualizacao_arvore():
                     
                     Estas rotações garantem que, após qualquer operação, a árvore permanece balanceada.
                     """)
-                    
-                    # Imagens ilustrativas de rotações
-                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/AVL_Tree_Rebalancing.svg/400px-AVL_Tree_Rebalancing.svg.png", 
-                            caption="Exemplos de rotações AVL")
+                
+                # Imagens ilustrativas de rotações
+                st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/AVL_Tree_Rebalancing.svg/400px-AVL_Tree_Rebalancing.svg.png", 
+                        caption="Exemplos de rotações AVL")
             else:
                 st.error("Não foi possível gerar a visualização.")
         else:
@@ -1044,8 +1084,8 @@ def mostrar_comparativo_estruturas():
         | Inserção | O(log n)   | O(1) no início, O(n) em posição arbitrária |
         | Remoção  | O(log n)   | O(1) no início, O(n) em posição arbitrária |
         
-        Para a base de dados atual com **{total} medicamentos**:
-        """)
+        Para a base de dados atual com **{} medicamentos**:
+        """.format(formatar_numero(total)))
         
         # Cálculos teóricos
         altura_avl = st.session_state.sistema.altura_arvore()
@@ -1055,13 +1095,13 @@ def mostrar_comparativo_estruturas():
         with col1:
             st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">O(log {total})</div>
+                <div class="metric-value">O(log {formatar_numero(total)})</div>
                 <div class="metric-label">Complexidade de Busca na AVL</div>
             </div>
             """, unsafe_allow_html=True)
             st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">{log_n:.1f}</div>
+                <div class="metric-value">{formatar_decimal(log_n, 1)}</div>
                 <div class="metric-label">Comparações (máx.) na AVL</div>
             </div>
             """, unsafe_allow_html=True)
@@ -1069,20 +1109,20 @@ def mostrar_comparativo_estruturas():
         with col2:
             st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">O({total})</div>
+                <div class="metric-value">O({formatar_numero(total)})</div>
                 <div class="metric-label">Complexidade de Busca na Lista</div>
             </div>
             """, unsafe_allow_html=True)
             st.markdown(f"""
             <div class="metric-card">
-                <div class="metric-value">{total}</div>
+                <div class="metric-value">{formatar_numero(total)}</div>
                 <div class="metric-label">Comparações (máx.) na Lista</div>
             </div>
             """, unsafe_allow_html=True)
         
         # Diferença teórica
         diferenca = total / log_n
-        st.info(f"💡 Teoricamente, a busca na Lista Encadeada pode ser até **{diferenca:.1f}x mais lenta** que na Árvore AVL para esta quantidade de dados.")
+        st.info(f"💡 Teoricamente, a busca na Lista Encadeada pode ser até **{formatar_decimal(diferenca, 1)}x mais lenta** que na Árvore AVL para esta quantidade de dados.")
         
         # Gráfico de complexidade
         st.write("### Crescimento da Complexidade")
@@ -1119,25 +1159,36 @@ def mostrar_comparativo_estruturas():
         
         # Criar dados de simulação
         tamanhos = [10, 100, 1000, 10000, 100000, 1000000]
+        tamanhos_formatados = [formatar_numero(t) for t in tamanhos]
         tempo_avl = [np.log2(n) * 0.01 for n in tamanhos]  # Simulação de tempo AVL
         tempo_lista = [n * 0.01 for n in tamanhos]  # Simulação de tempo Lista
         
         # Limitar para visualização
         tempo_lista = [min(t, 100) for t in tempo_lista]  # Cap para visualização
         
+        # Formatar para exibição
+        tempo_avl_fmt = [formatar_decimal(t, 3) for t in tempo_avl]
+        tempo_lista_fmt = [formatar_decimal(t, 3) for t in tempo_lista]
+        
         # Criar DataFrame
         df_tempo = pd.DataFrame({
-            'Tamanho': [str(n) for n in tamanhos] * 2,
+            'Tamanho': tamanhos_formatados * 2,
+            'Tamanho_Original': tamanhos * 2,  # Para ordenação
             'Tempo (ms)': tempo_avl + tempo_lista,
+            'Tempo_Fmt': tempo_avl_fmt + tempo_lista_fmt,
             'Estrutura': ['AVL'] * len(tamanhos) + ['Lista'] * len(tamanhos)
         })
         
         # Gráfico com Altair
         chart = alt.Chart(df_tempo).mark_bar().encode(
-            x=alt.X('Tamanho:N', sort=tamanhos),
-            y='Tempo (ms)',
-            color='Estrutura',
-            column=alt.Column('Estrutura', header=alt.Header(labelOrient='bottom'))
+            x=alt.X('Tamanho:N', sort=alt.EncodingSortField(field='Tamanho_Original', order='ascending')),
+            y=alt.Y('Tempo (ms):Q'),
+            color='Estrutura:N',
+            tooltip=[
+                alt.Tooltip('Tamanho:N', title='Tamanho (n)'),
+                alt.Tooltip('Tempo_Fmt:N', title='Tempo (ms)')
+            ],
+            column=alt.Column('Estrutura:N', header=alt.Header(labelOrient='bottom'))
         ).properties(
             title='Tempo de Busca Estimado por Tamanho de Dataset'
         )
@@ -1146,15 +1197,22 @@ def mostrar_comparativo_estruturas():
         
         # Outra visualização: speedup
         speedup = [lista/avl for lista, avl in zip(tempo_lista, tempo_avl)]
+        speedup_fmt = [formatar_decimal(s, 1) for s in speedup]
         df_speedup = pd.DataFrame({
-            'Tamanho': [str(n) for n in tamanhos],
-            'Speedup (vezes mais rápido)': speedup
+            'Tamanho': tamanhos_formatados,
+            'Tamanho_Original': tamanhos,  # Para ordenação
+            'Speedup': speedup,
+            'Speedup_Fmt': speedup_fmt
         })
         
         chart2 = alt.Chart(df_speedup).mark_bar().encode(
-            x='Tamanho:N',
-            y='Speedup (vezes mais rápido)',
-            color=alt.Color('Speedup (vezes mais rápido)', scale=alt.Scale(scheme='viridis'))
+            x=alt.X('Tamanho:N', sort=alt.EncodingSortField(field='Tamanho_Original', order='ascending')),
+            y=alt.Y('Speedup:Q', title='Vezes mais rápido'),
+            color=alt.Color('Speedup:Q', scale=alt.Scale(scheme='viridis')),
+            tooltip=[
+                alt.Tooltip('Tamanho:N', title='Tamanho (n)'),
+                alt.Tooltip('Speedup_Fmt:N', title='Vezes mais rápido')
+            ]
         ).properties(
             title='Quantas vezes a AVL é mais rápida que a Lista Encadeada',
             width=600,
@@ -1164,7 +1222,7 @@ def mostrar_comparativo_estruturas():
         st.altair_chart(chart2, use_container_width=True)
         
         # Conclusão
-        st.info("""
+        st.info(f"""
         **Conclusão:**
         
         A diferença de desempenho entre a Árvore AVL e a Lista Encadeada cresce dramaticamente 
@@ -1172,8 +1230,8 @@ def mostrar_comparativo_estruturas():
         a AVL pode ser milhares de vezes mais eficiente que uma lista encadeada para operações de busca.
         
         * Para 10 itens: Diferença pequena
-        * Para 1.000 itens: AVL ~100x mais rápida
-        * Para 1.000.000 itens: AVL ~50.000x mais rápida
+        * Para 1.000 itens: AVL ~{formatar_decimal(speedup[2], 0)}x mais rápida
+        * Para 1.000.000 itens: AVL ~{formatar_decimal(speedup[5], 0)}x mais rápida
         
         Isso demonstra por que estruturas de dados balanceadas como a Árvore AVL são essenciais 
         para sistemas que precisam manipular grandes volumes de dados eficientemente.
@@ -1193,11 +1251,11 @@ def exibir_detalhes_medicamento(medicamento):
     
     with col2:
         if medicamento.quantidade < 5:
-            st.markdown(f"**Estoque:** <span class='critical'>{medicamento.quantidade} unidades</span>", unsafe_allow_html=True)
+            st.markdown(f"**Estoque:** <span class='critical'>{formatar_numero(medicamento.quantidade)} unidades</span>", unsafe_allow_html=True)
         elif medicamento.quantidade < 10:
-            st.markdown(f"**Estoque:** <span class='warning'>{medicamento.quantidade} unidades</span>", unsafe_allow_html=True)
+            st.markdown(f"**Estoque:** <span class='warning'>{formatar_numero(medicamento.quantidade)} unidades</span>", unsafe_allow_html=True)
         else:
-            st.markdown(f"**Estoque:** <span class='normal'>{medicamento.quantidade} unidades</span>", unsafe_allow_html=True)
+            st.markdown(f"**Estoque:** <span class='normal'>{formatar_numero(medicamento.quantidade)} unidades</span>", unsafe_allow_html=True)
         
         st.write(f"**Preço:** {formatar_moeda(medicamento.preco)}")
         st.write(f"**Validade:** {medicamento.validade}")
@@ -1211,7 +1269,7 @@ def exibir_lista_medicamentos(medicamentos, titulo, destaque_estoque=False, limi
     """Exibe uma lista de medicamentos em forma de tabela"""
     if medicamentos:
         st.subheader(titulo)
-        st.write(f"Total de itens: {len(medicamentos)}")
+        st.write(f"Total de itens: {formatar_numero(len(medicamentos))}")
         
         # Converte para DataFrame
         df = pd.DataFrame([{
@@ -1220,20 +1278,28 @@ def exibir_lista_medicamentos(medicamentos, titulo, destaque_estoque=False, limi
             "Categoria": med.categoria,
             "Preço": formatar_moeda(med.preco),
             "Estoque": med.quantidade,
+            "Estoque_Fmt": formatar_numero(med.quantidade),  # Coluna adicional formatada
             "Validade": med.validade
         } for med in medicamentos])
+        
+        # Prepara dataframe para exibição
+        df_exibicao = df.copy()
+        df_exibicao["Estoque"] = df_exibicao["Estoque_Fmt"]  # Substitui pela versão formatada
+        df_exibicao = df_exibicao.drop(columns=["Estoque_Fmt"])  # Remove coluna auxiliar
         
         # Adiciona estilo com destaque para estoque crítico
         if destaque_estoque:
             def highlight_estoque(s):
+                # Usa a coluna original não formatada para comparações
+                original_estoque = df['Estoque'].tolist()
                 return ['background-color: red; color: white' if v < 5 else 
                         'background-color: orange; color: black' if v < limite_critico else 
-                        '' for v in s]
+                        '' for v in original_estoque]
             
-            styled_df = df.style.apply(highlight_estoque, subset=['Estoque'])
+            styled_df = df_exibicao.style.apply(highlight_estoque, subset=['Estoque'])
             st.dataframe(styled_df, use_container_width=True)
         else:
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df_exibicao, use_container_width=True)
     else:
         st.info(f"Nenhum medicamento encontrado para: {titulo}")
 
