@@ -14,6 +14,34 @@ CATEGORIAS = [
     "Diurético", "Laxante", "Relaxante muscular", "Sedativo"
 ]
 
+# Configuração de estoque por categoria (para gerar dados mais realistas)
+# Define padrões de estoque específicos para cada categoria
+ESTOQUE_POR_CATEGORIA = {
+    "Analgésico": {"baixo": 0.05, "medio": 0.30, "alto": 0.50, "muito_alto": 0.15},  # Alto giro de estoque
+    "Antibiótico": {"baixo": 0.15, "medio": 0.60, "alto": 0.20, "muito_alto": 0.05},  # Estoque controlado
+    "Anti-inflamatório": {"baixo": 0.05, "medio": 0.35, "alto": 0.55, "muito_alto": 0.05},  # Alto giro
+    "Antidepressivo": {"baixo": 0.10, "medio": 0.70, "alto": 0.15, "muito_alto": 0.05},  # Estoque estável
+    "Anti-hipertensivo": {"baixo": 0.05, "medio": 0.70, "alto": 0.20, "muito_alto": 0.05},  # Uso contínuo
+    "Antiácido": {"baixo": 0.20, "medio": 0.60, "alto": 0.15, "muito_alto": 0.05},  # Varia bastante
+    "Antialérgico": {"baixo": 0.30, "medio": 0.50, "alto": 0.15, "muito_alto": 0.05},  # Sazonal, baixo agora
+    "Vitamina": {"baixo": 0.05, "medio": 0.25, "alto": 0.50, "muito_alto": 0.20},  # Estoque alto
+    "Hormônio": {"baixo": 0.15, "medio": 0.75, "alto": 0.08, "muito_alto": 0.02},  # Controlado
+    "Antiviral": {"baixo": 0.40, "medio": 0.50, "alto": 0.08, "muito_alto": 0.02},  # Baixo estoque geral
+    "Anticoagulante": {"baixo": 0.15, "medio": 0.75, "alto": 0.08, "muito_alto": 0.02},  # Controlado
+    "Antidiabético": {"baixo": 0.10, "medio": 0.70, "alto": 0.15, "muito_alto": 0.05},  # Estável
+    "Antifúngico": {"baixo": 0.25, "medio": 0.60, "alto": 0.10, "muito_alto": 0.05},  # Modesto
+    "Antiparasitário": {"baixo": 0.30, "medio": 0.60, "alto": 0.08, "muito_alto": 0.02},  # Baixo estoque
+    "Broncodilatador": {"baixo": 0.20, "medio": 0.60, "alto": 0.15, "muito_alto": 0.05},  # Moderado
+    "Corticosteroide": {"baixo": 0.15, "medio": 0.70, "alto": 0.10, "muito_alto": 0.05},  # Controlado
+    "Diurético": {"baixo": 0.10, "medio": 0.70, "alto": 0.15, "muito_alto": 0.05},  # Estável
+    "Laxante": {"baixo": 0.05, "medio": 0.35, "alto": 0.40, "muito_alto": 0.20},  # Alto estoque
+    "Relaxante muscular": {"baixo": 0.15, "medio": 0.60, "alto": 0.20, "muito_alto": 0.05},  # Moderado
+    "Sedativo": {"baixo": 0.20, "medio": 0.70, "alto": 0.08, "muito_alto": 0.02},  # Controlado
+}
+
+# Padrão para categorias não especificadas
+ESTOQUE_PADRAO = {"baixo": 0.15, "medio": 0.60, "alto": 0.20, "muito_alto": 0.05}
+
 FABRICANTES = [
     "EMS", "Medley", "Neo Química", "Eurofarma", "Aché", "Cimed", 
     "Novartis", "Pfizer", "Sanofi", "Bayer", "GSK", "Roche",
@@ -57,10 +85,19 @@ def gerar_nome_medicamento() -> str:
         return f"{radical.capitalize()}{sufixo}{numero}"
 
 def gerar_data_validade() -> str:
-    """Gera uma data de validade futura no formato YYYY-MM-DD"""
+    """
+    Gera uma data de validade, com uma pequena chance (5%) de ser nos próximos 3 meses
+    """
     hoje = datetime.date.today()
-    # Medicamentos geralmente têm validade de 1 a 5 anos
-    dias_para_adicionar = random.randint(365, 365 * 5)
+    
+    # 5% de chance para gerar uma data próxima da validade (dentro de 3 meses)
+    if random.random() < 0.05:
+        # Entre 0 e 90 dias para a validade
+        dias_para_adicionar = random.randint(0, 90)
+    else:
+        # Medicamentos geralmente têm validade de 1 a 5 anos
+        dias_para_adicionar = random.randint(365, 365 * 5)
+    
     data_validade = hoje + datetime.timedelta(days=dias_para_adicionar)
     return data_validade.strftime("%Y-%m-%d")
 
@@ -78,21 +115,39 @@ def gerar_preco() -> float:
     else:  # 10% dos medicamentos caros, entre R$300 e R$1000
         return round(random.uniform(300.0, 1000.0), 2)
 
-def gerar_quantidade() -> int:
-    """Gera uma quantidade realista para o estoque"""
-    # Diferentes padrões de estoque
-    padrao = random.random()
+def gerar_quantidade(categoria: str) -> int:
+    """
+    Gera uma quantidade realista para o estoque baseado na categoria
+    """
+    # Obtém a distribuição de estoque para a categoria específica ou usa o padrão
+    distribuicao = ESTOQUE_POR_CATEGORIA.get(categoria, ESTOQUE_PADRAO)
     
-    if padrao < 0.05:  # 5% com estoque muito baixo (1-5)
+    # Determina a faixa de estoque com base na distribuição específica da categoria
+    faixa = random.random()
+    acumulado = 0
+    
+    # Estoque muito baixo/crítico (1-5) - chance específica por categoria
+    acumulado += distribuicao["baixo"] * 0.33  # Um terço da probabilidade "baixo" é crítico
+    if faixa < acumulado:
         return random.randint(1, 5)
-    elif padrao < 0.15:  # 10% com estoque baixo (6-20)
+    
+    # Estoque baixo (6-20) - restante da probabilidade "baixo" + parte de "medio"
+    acumulado += distribuicao["baixo"] * 0.67  # Dois terços da probabilidade "baixo" é baixo normal
+    if faixa < acumulado:
         return random.randint(6, 20)
-    elif padrao < 0.65:  # 50% com estoque médio (21-100)
+    
+    # Estoque médio (21-100) - maior parte da probabilidade "medio"
+    acumulado += distribuicao["medio"]
+    if faixa < acumulado:
         return random.randint(21, 100)
-    elif padrao < 0.90:  # 25% com estoque alto (101-300)
+    
+    # Estoque alto (101-300) - probabilidade "alto"
+    acumulado += distribuicao["alto"]
+    if faixa < acumulado:
         return random.randint(101, 300)
-    else:  # 10% com estoque muito alto (301-1000)
-        return random.randint(301, 1000)
+    
+    # Estoque muito alto (301-1000) - probabilidade "muito_alto"
+    return random.randint(301, 1000)
 
 def obter_proximo_id_disponivel(db_path: str) -> int:
     """Obtém o próximo ID disponível no banco de dados"""
@@ -129,7 +184,7 @@ def gerar_medicamentos(quantidade: int = 1000, id_inicial: int = 1) -> List[Medi
         nome = gerar_nome_medicamento()
         categoria = random.choice(CATEGORIAS)
         preco = gerar_preco()
-        qtd = gerar_quantidade()
+        qtd = gerar_quantidade(categoria)  # Usa a categoria para determinar o padrão de estoque
         validade = gerar_data_validade()
         fabricante = random.choice(FABRICANTES)
         
@@ -301,6 +356,36 @@ def visualizar_estatisticas_medicamentos(db_path: str = "farmacia.db"):
     valor_total = cursor.fetchone()[0]
     
     print(f"Valor total em estoque: R$ {valor_total:,.2f}")
+    
+    # Estatísticas de estoque por categoria
+    print("\nDistribuição de estoque por categoria:")
+    cursor.execute("""
+        SELECT categoria, 
+               AVG(quantidade) as media, 
+               MIN(quantidade) as minimo, 
+               MAX(quantidade) as maximo,
+               SUM(quantidade) as total
+        FROM medicamentos 
+        GROUP BY categoria 
+        ORDER BY AVG(quantidade) DESC
+    """)
+    
+    estoque_por_categoria = cursor.fetchall()
+    for cat, media, minimo, maximo, total in estoque_por_categoria:
+        print(f"  {cat}: Média={media:.1f}, Min={minimo}, Max={maximo}, Total={total}")
+    
+    # Medicamentos próximos da validade
+    hoje = datetime.date.today()
+    tres_meses = hoje + datetime.timedelta(days=90)
+    tres_meses_str = tres_meses.strftime("%Y-%m-%d")
+    
+    cursor.execute(f"""
+        SELECT COUNT(*) FROM medicamentos 
+        WHERE validade <= '{tres_meses_str}' AND validade >= '{hoje}'
+    """)
+    vencendo = cursor.fetchone()[0]
+    
+    print(f"\nMedicamentos vencendo nos próximos 3 meses: {vencendo} ({vencendo/total*100:.1f}%)")
     
     conn.close()
 
