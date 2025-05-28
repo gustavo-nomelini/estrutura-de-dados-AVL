@@ -712,16 +712,44 @@ def buscar_medicamentos():
     # Tab 2: Busca por intervalo de códigos
     with tabs[1]:
         st.subheader("Busca por Intervalo de Códigos")
-        col1, col2 = st.columns(2)
-        with col1:
-            codigo_inicio = st.number_input("Código inicial:", min_value=1, step=1, key="codigo_inicio")
-        with col2:
-            codigo_fim = st.number_input("Código final:", min_value=codigo_inicio, step=1, 
-                                       value=min(codigo_inicio + 100, 9999), key="codigo_fim")
         
-        if st.button("🔎 Buscar por Intervalo", key="btn_busca_intervalo"):
-            medicamentos = st.session_state.sistema.buscar_por_intervalo(codigo_inicio, codigo_fim)
-            exibir_lista_medicamentos(medicamentos, f"Medicamentos com código entre {codigo_inicio} e {codigo_fim}")
+        # Use a form to handle sequential input properly
+        with st.form(key="intervalo_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                codigo_inicio = st.number_input(
+                    "Código inicial:", 
+                    min_value=1, 
+                    step=1, 
+                    key="codigo_inicio"
+                )
+            
+            with col2:
+                # Set a reasonable default max value
+                max_codigo = 999999
+                codigo_fim = st.number_input(
+                    "Código final:", 
+                    min_value=1,  # Start with 1 as min_value
+                    value=codigo_inicio + 100,  # Default to inicio+100
+                    max_value=max_codigo,
+                    step=1, 
+                    key="codigo_fim"
+                )
+            
+            # Add a validation message if needed
+            if codigo_fim < codigo_inicio:
+                st.warning("O código final deve ser maior ou igual ao código inicial.")
+            
+            # Submit button for the form
+            buscar_submitted = st.form_submit_button("🔎 Buscar por Intervalo")
+        
+        # Process form after submission
+        if buscar_submitted:
+            # Ensure código_fim is at least código_inicio
+            codigo_fim_final = max(codigo_inicio, codigo_fim)
+            medicamentos = st.session_state.sistema.buscar_por_intervalo(codigo_inicio, codigo_fim_final)
+            exibir_lista_medicamentos(medicamentos, f"Medicamentos com código entre {codigo_inicio} e {codigo_fim_final}")
     
     # Tab 3: Busca por faixa de preço
     with tabs[2]:
