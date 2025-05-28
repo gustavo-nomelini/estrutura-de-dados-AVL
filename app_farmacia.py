@@ -555,7 +555,7 @@ def mostrar_dashboard():
     with dashboard_tabs[2]:
         st.subheader("📅 Medicamentos com Validade Próxima")
         
-        com st.container():
+        with st.container():
             # Lazy load expiration data
             with st.spinner("Verificando datas de validade..."):
                 hoje = datetime.now().date()
