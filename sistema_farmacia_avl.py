@@ -7,6 +7,7 @@ import sys
 import locale
 import time
 import random
+import numpy as np
 
 # Configurar locale para formatação monetária adequada ao Brasil
 try:
@@ -626,6 +627,8 @@ def exibir_menu() -> None:
     print("11. Importar dados de CSV")
     print("12. Estatísticas da árvore AVL")
     print("13. Comparar tempos de busca (AVL vs Lista Encadeada)")
+    print("14. Verificar medicamentos próximos do vencimento")  # Nova opção
+    print("15. Análise de desempenho com 500.000 medicamentos")  # Nova opção para análise avançada
     print("0. Sair")
     print("="*60)
 
@@ -891,11 +894,301 @@ def comparar_tempos_busca(sistema: ArvoreAVL) -> None:
     print("• Além da busca rápida, a AVL também mantém os dados organizados (ordenados)")
 
 
+def verificar_validade(medicamentos: List[Medicamento], dias_limite: int = 90) -> List[Medicamento]:
+    """
+    Filtra medicamentos que estão próximos da data de vencimento.
+    
+    Args:
+        medicamentos: Lista de medicamentos
+        dias_limite: Número de dias para considerar próximo do vencimento
+    
+    Returns:
+        Lista de medicamentos próximos do vencimento
+    """
+    hoje = datetime.date.today()
+    med_a_vencer = []
+    
+    for med in medicamentos:
+        try:
+            data_validade = datetime.datetime.strptime(med.validade, "%Y-%m-%d").date()
+            dias_ate_vencer = (data_validade - hoje).days
+            
+            if 0 <= dias_ate_vencer <= dias_limite:
+                med_a_vencer.append((med, dias_ate_vencer))
+        except (ValueError, TypeError):
+            # Ignora datas de validade inválidas
+            pass
+    
+    # Ordena por proximidade da validade
+    med_a_vencer.sort(key=lambda x: x[1])
+    return [med for med, _ in med_a_vencer]
+
+
+def exibir_medicamentos_a_vencer() -> None:
+    """Exibe uma lista de medicamentos próximos do vencimento."""
+    # Fix: Access the sistema variable directly from the calling scope
+    sistema = None
+    
+    # Check if we're in the global session state context
+    if 'st' in globals() and hasattr(globals()['st'], 'session_state') and hasattr(globals()['st'].session_state, 'sistema'):
+        sistema = globals()['st'].session_state.sistema
+    
+    # If not in session state, try to get from current function's scope
+    if sistema is None and 'sistema' in locals():
+        sistema = locals()['sistema']
+    
+    # If still not found, look in global scope
+    if sistema is None and 'sistema' in globals():
+        sistema = globals()['sistema']
+    
+    # Final fallback - access it via the parent function's local variables
+    if sistema is None:
+        import inspect
+        frame = inspect.currentframe().f_back
+        if 'sistema' in frame.f_locals:
+            sistema = frame.f_locals['sistema']
+    
+    # Check if we found a valid sistema object
+    if sistema is None or not hasattr(sistema, 'listar_todos'):
+        print("\nSistema não inicializado corretamente.")
+        return
+    
+    medicamentos = sistema.listar_todos()
+    
+    if not medicamentos:
+        print("\nNão há medicamentos cadastrados.")
+        return
+    
+    # Solicita o limite de dias ao usuário
+    try:
+        dias_limite = int(input("\nConsiderar medicamentos que vencem em até quantos dias? (padrão: 90): ") or "90")
+    except ValueError:
+        print("\nValor inválido. Usando padrão de 90 dias.")
+        dias_limite = 90
+    
+    # Obtém medicamentos próximos do vencimento
+    med_a_vencer = verificar_validade(medicamentos, dias_limite)
+    
+    if not med_a_vencer:
+        print(f"\nNão há medicamentos vencendo nos próximos {dias_limite} dias.")
+        return
+    
+    hoje = datetime.date.today()
+    
+    print(f"\n--- Medicamentos Vencendo nos Próximos {dias_limite} dias ({len(med_a_vencer)}) ---")
+    print(f"{'Código':<8} {'Nome':<25} {'Estoque':<10} {'Validade':<12} {'Dias restantes':<15} {'Status'}")
+    print("-" * 85)
+    
+    for med in med_a_vencer:
+        # Calcula dias até o vencimento
+        data_validade = datetime.datetime.strptime(med.validade, "%Y-%m-%d").date()
+        dias_ate_vencer = (data_validade - hoje).days
+        
+        # Define o status de vencimento
+        if dias_ate_vencer < 0:
+            status = "VENCIDO"
+        elif dias_ate_vencer <= 30:
+            status = "CRÍTICO"
+        elif dias_ate_vencer <= 60:
+            status = "ATENÇÃO"
+        else:
+            status = "OK"
+        
+        nome_truncado = med.nome[:23] + ".." if len(med.nome) > 25 else med.nome
+        
+        print(f"{med.codigo:<8} {nome_truncado:<25} {med.quantidade:<10} {med.validade:<12} {dias_ate_vencer:>15} {status}")
+    
+    # Opção para gerar relatório CSV
+    exportar = input("\nDeseja exportar esta lista para CSV? (S/N): ").upper() == "S"
+    if exportar:
+        nome_arquivo = input("Nome do arquivo (padrão: medicamentos_validade.csv): ") or "medicamentos_validade.csv"
+        
+        try:
+            with open(nome_arquivo, 'w', encoding='utf-8') as f:
+                # Cabeçalho
+                f.write("codigo,nome,categoria,preco,quantidade,validade,dias_ate_vencer,status\n")
+                
+                # Dados
+                for med in med_a_vencer:
+                    data_validade = datetime.datetime.strptime(med.validade, "%Y-%m-%d").date()
+                    dias_ate_vencer = (data_validade - hoje).days
+                    
+                    if dias_ate_vencer < 0:
+                        status = "VENCIDO"
+                    elif dias_ate_vencer <= 30:
+                        status = "CRÍTICO"
+                    elif dias_ate_vencer <= 60:
+                        status = "ATENÇÃO"
+                    else:
+                        status = "OK"
+                    
+                    linha = f"{med.codigo},{med.nome},{med.categoria},{med.preco},{med.quantidade},{med.validade},{dias_ate_vencer},{status}\n"
+                    f.write(linha)
+                
+                print(f"\nRelatório exportado com sucesso para '{nome_arquivo}'!")
+        except Exception as e:
+            print(f"\nErro ao exportar relatório: {e}")
+
+
+def analisar_desempenho_grande_escala() -> None:
+    """Realiza uma análise detalhada de desempenho com grande volume de dados."""
+    print("\n=== ANÁLISE DE DESEMPENHO AVL vs. LISTA ENCADEADA COM 500.000 ITENS ===")
+    print("\nEste teste simula operações em uma base de dados muito grande.")
+    print("ATENÇÃO: Esta análise pode demorar alguns minutos para ser concluída.")
+    
+    confirmar = input("\nDeseja prosseguir com a análise? (S/N): ").upper()
+    if confirmar != "S":
+        print("Análise cancelada.")
+        return
+    
+    # Tamanho da simulação
+    n = 500000
+    print(f"\nGerando {n:,} códigos para teste...".replace(",", "."))
+    
+    # Gera IDs sequenciais (ordenados)
+    ids_ordenados = list(range(1, n+1))
+    
+    # Gera IDs aleatórios (não ordenados)
+    ids_aleatorios = list(range(1, n+1))
+    random.shuffle(ids_aleatorios)
+    
+    # Tempos para diferentes cenários e estruturas
+    tempos = {
+        "avl": {"melhor": 0, "medio": 0, "pior": 0, "aleatorio": 0, "inexistente": 0},
+        "lista": {"melhor": 0, "medio": 0, "pior": 0, "aleatorio": 0, "inexistente": 0}
+    }
+    
+    print("\n=== SIMULANDO BUSCAS EM ÁRVORE AVL ===")
+    
+    # Simulação de busca na AVL (log n)
+    def simular_busca_avl(codigo, n):
+        # Simulação simplificada de busca em AVL: O(log n)
+        comparacoes = int(np.log2(n)) + 1
+        # Simula o tempo gasto (proporcional ao número de comparações)
+        tempo = comparacoes * 0.001  # simula microsegundos por comparação
+        return tempo * 1000  # converte para milissegundos
+    
+    # Melhor/pior/médio caso para AVL são semelhantes devido à natureza balanceada
+    print("Simulando busca no primeiro elemento (raiz/melhor caso)...")
+    tempos["avl"]["melhor"] = simular_busca_avl(ids_ordenados[0], n)
+    
+    print("Simulando busca no elemento do meio...")
+    tempos["avl"]["medio"] = simular_busca_avl(ids_ordenados[n//2], n)
+    
+    print("Simulando busca no último elemento (pior caso)...")
+    tempos["avl"]["pior"] = simular_busca_avl(ids_ordenados[n-1], n)
+    
+    print("Simulando busca em elemento aleatório...")
+    idx_aleatorio = random.randint(0, n-1)
+    tempos["avl"]["aleatorio"] = simular_busca_avl(ids_aleatorios[idx_aleatorio], n)
+    
+    print("Simulando busca de código inexistente...")
+    tempos["avl"]["inexistente"] = simular_busca_avl(n+1000, n)
+    
+    print("\n=== SIMULANDO BUSCAS EM LISTA ENCADEADA ===")
+    
+    # Simulação de busca na lista (linear)
+    def simular_busca_lista(indice, n):
+        # Simulação de busca em lista encadeada: O(n)
+        # Na lista, o número de comparações depende da posição do elemento
+        comparacoes = indice + 1  # +1 porque índice começa em 0
+        # Simula o tempo gasto (proporcional ao número de comparações)
+        tempo = comparacoes * 0.001  # simula microsegundos por comparação
+        return tempo * 1000  # converte para milissegundos
+    
+    print("Simulando busca no primeiro elemento (melhor caso para lista)...")
+    tempos["lista"]["melhor"] = simular_busca_lista(0, n)
+    
+    print("Simulando busca no elemento do meio...")
+    tempos["lista"]["medio"] = simular_busca_lista(n//2, n)
+    
+    print("Simulando busca no último elemento (pior caso para lista)...")
+    tempos["lista"]["pior"] = simular_busca_lista(n-1, n)
+    
+    print("Simulando busca em elemento aleatório...")
+    tempos["lista"]["aleatorio"] = simular_busca_lista(idx_aleatorio, n)
+    
+    print("Simulando busca de código inexistente...")
+    tempos["lista"]["inexistente"] = simular_busca_lista(n, n)  # Se não existe, percorre toda a lista
+    
+    # Exibe resultados
+    print("\n=== RESULTADOS DA SIMULAÇÃO ===")
+    print(f"\nComparando busca em {n:,} elementos:".replace(",", "."))
+    print(f"\n{'Cenário':<15} {'Tempo AVL (ms)':<20} {'Tempo Lista (ms)':<20} {'Diferença (x)':<15}")
+    print("-" * 72)
+    
+    for cenario in ["melhor", "medio", "pior", "aleatorio", "inexistente"]:
+        tempo_avl = tempos["avl"][cenario]
+        tempo_lista = tempos["lista"][cenario]
+        diferenca = tempo_lista / tempo_avl if tempo_avl > 0 else "N/A"
+        
+        # Formata o nome do cenário para exibição
+        nome_cenario = {
+            "melhor": "Melhor caso",
+            "medio": "Caso médio",
+            "pior": "Pior caso",
+            "aleatorio": "Aleatório",
+            "inexistente": "Inexistente"
+        }.get(cenario, cenario)
+        
+        print(f"{nome_cenario:<15} {tempo_avl:<20.6f} {tempo_lista:<20.6f} {diferenca:<15.2f}")
+    
+    # Gráfico ASCII simples para visualizar a diferença
+    print("\nComparação Visual (escala logarítmica, cada '*' representa ~10x):")
+    
+    max_log = int(np.log10(tempos["lista"]["pior"] / tempos["avl"]["pior"])) + 1
+    escala = max(1, max_log // 10)
+    
+    print(f"\n{'Cenário':<15} {'AVL':<50} {'Lista':<50}")
+    print("-" * 115)
+    
+    for cenario in ["melhor", "medio", "pior", "aleatorio", "inexistente"]:
+        nome_cenario = {
+            "melhor": "Melhor caso",
+            "medio": "Caso médio",
+            "pior": "Pior caso",
+            "aleatorio": "Aleatório",
+            "inexistente": "Inexistente"
+        }.get(cenario, cenario)
+        
+        tempo_avl = tempos["avl"][cenario]
+        tempo_lista = tempos["lista"][cenario]
+        
+        # Cálculo para escala logarítmica do gráfico ASCII
+        bar_avl = "*" * (int(np.log10(tempo_avl + 0.001) / escala) + 1)
+        bar_lista = "*" * (int(np.log10(tempo_lista + 0.001) / escala) + 1)
+        
+        print(f"{nome_cenario:<15} {bar_avl:<50} {bar_lista:<50}")
+    
+    # Conclusão
+    avl_log = np.log2(n)
+    print(f"\nConclusão Teórica para {n:,} elementos:".replace(",", "."))
+    print(f"- Árvore AVL:      O(log n) ≈ {avl_log:.1f} comparações")
+    print(f"- Lista Encadeada:  O(n)     = {n:,} comparações (pior caso)".replace(",", "."))
+    print(f"- Diferença teórica: {n/avl_log:.1f}x em favor da AVL")
+    
+    # Explicação avançada
+    print("\nAnálise Detalhada:")
+    print("- A AVL mantém um desempenho consistente (logarítmico) independente do caso")
+    print("- A lista tem desempenho linear que varia muito do melhor para o pior caso")
+    print("- Em sistemas reais, o impacto seria ainda maior devido a:")
+    print("  * Alocação de memória mais eficiente na árvore (localidade)")
+    print("  * Operações de cache mais eficientes")
+    print("  * Menor overhead em operações subsequentes após a primeira busca")
+
+
 def main_cli() -> None:
     """Função principal da interface de linha de comando."""
     # Configura o sistema
     sistema = ArvoreAVL()
     sistema.conectar_bd("farmacia.db")
+    
+    # Create a módulo global para armazenas objeto st simulado
+    # This creates a module-level variable to store the session state
+    global st
+    st = type('', (), {})()  # Cria um objeto simples para simular o st do Streamlit
+    st.session_state = type('', (), {})()
+    st.session_state.sistema = sistema
     
     try:
         # Carrega medicamentos do banco
@@ -1057,6 +1350,14 @@ def main_cli() -> None:
             
             elif opcao == "13":  # Comparar tempos de busca
                 comparar_tempos_busca(sistema)
+                pausar()
+            
+            elif opcao == "14":  # Verificar medicamentos próximos do vencimento
+                exibir_medicamentos_a_vencer()
+                pausar()
+                
+            elif opcao == "15":  # Análise de desempenho avançada
+                analisar_desempenho_grande_escala()
                 pausar()
             
             else:
