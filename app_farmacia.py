@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import altair as alt
 import locale
+from functools import lru_cache
 
 # Aumenta o limite de células renderizáveis pelo Pandas Styler
 pd.set_option("styler.render.max_elements", 500000)
@@ -314,22 +315,41 @@ def main():
         mostrar_comparativo_estruturas()
 
 
+@st.cache_data(ttl=300)  # Cache data for 5 minutes
+def get_cached_medicamentos():
+    """Cache medicamentos to avoid repeated database queries"""
+    return st.session_state.sistema.listar_todos()
+
+@st.cache_data(ttl=300)
+def get_estoque_critico(medicamentos, limite=5):
+    """Get medications with critical stock levels"""
+    return [med for med in medicamentos if med.quantidade < limite]
+
+@st.cache_data(ttl=300)
+def get_estoque_statistics(medicamentos):
+    """Calculate stock statistics"""
+    total_estoque = sum(med.quantidade for med in medicamentos)
+    valor_total = sum(med.preco * med.quantidade for med in medicamentos)
+    estoque_baixo = sum(1 for med in medicamentos if med.quantidade < 10)
+    estoque_critico = sum(1 for med in medicamentos if med.quantidade < 5)
+    return total_estoque, valor_total, estoque_baixo, estoque_critico
+
 def mostrar_dashboard():
     st.header("📊 Dashboard")
     
-    # Estatísticas do sistema
-    medicamentos = st.session_state.sistema.listar_todos()
+    # Show loading state
+    with st.spinner("Carregando dados do sistema..."):
+        # Get cached medications data
+        medicamentos = get_cached_medicamentos()
     
     if not medicamentos:
         st.warning("Não há medicamentos cadastrados. Utilize o menu para adicionar medicamentos.")
         return
     
-    # Métricas principais
-    total_estoque = sum(med.quantidade for med in medicamentos)
-    valor_total = sum(med.preco * med.quantidade for med in medicamentos)
-    estoque_baixo = len([m for m in medicamentos if m.quantidade < 10])
-    estoque_critico = len([m for m in medicamentos if m.quantidade < 5])
+    # Prepare data - use cached statistics
+    total_estoque, valor_total, estoque_baixo, estoque_critico = get_estoque_statistics(medicamentos)
     
+    # Display metrics in cards
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -364,185 +384,235 @@ def mostrar_dashboard():
         </div>
         """, unsafe_allow_html=True)
     
-    # Medicamentos com estoque crítico
-    st.subheader("⚠️ Medicamentos com Estoque Crítico")
-    estoque_critico_meds = st.session_state.sistema.listar_estoque_baixo(5)
+    # Implement tabbed interface for better organization and performance
+    dashboard_tabs = st.tabs(["Estoque Crítico", "Análise de Dados", "Validade"])
     
-    if estoque_critico_meds:
-        df_critico = pd.DataFrame([{
-            "Código": med.codigo,
-            "Nome": med.nome,
-            "Categoria": med.categoria,
-            "Preço": f"R$ {med.preco:.2f}",
-            "Estoque": med.quantidade,
-            "Validade": med.validade
-        } for med in estoque_critico_meds])
+    # Tab 1: Critical stock - only load when this tab is selected
+    with dashboard_tabs[0]:
+        st.subheader("⚠️ Medicamentos com Estoque Crítico")
         
-        # Usando .map em vez de .applymap (que está obsoleto)
-        def highlight_estoque(s):
-            return ['color: red; font-weight: bold' if v < 5 else 
-                    'color: orange' if v < 10 else '' for v in s]
+        # Use the cached critical stock data
+        with st.spinner("Verificando medicamentos com estoque crítico..."):
+            estoque_critico_meds = get_estoque_critico(medicamentos)
         
-        styled_df = df_critico.style.apply(highlight_estoque, subset=['Estoque'])
-        st.dataframe(styled_df, use_container_width=True)
-    else:
-        st.success("Não há medicamentos com estoque crítico. Parabéns!")
+        if estoque_critico_meds:
+            # Create DataFrame once, efficiently
+            df_critico = pd.DataFrame([{
+                "Código": med.codigo,
+                "Nome": med.nome,
+                "Categoria": med.categoria,
+                "Preço": formatar_moeda(med.preco),  # Pre-format the price
+                "Estoque": med.quantidade,
+                "Validade": med.validade
+            } for med in estoque_critico_meds])
+            
+            # Apply styling more efficiently
+            def highlight_estoque(s):
+                return ['color: red; font-weight: bold' if v < 5 else '' for v in s]
+            
+            styled_df = df_critico.style.apply(highlight_estoque, subset=['Estoque'])
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # Provide download option
+            if st.button("📥 Baixar Lista de Estoque Crítico", key="download_critico"):
+                csv = df_critico.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "Confirmar Download CSV",
+                    csv,
+                    "estoque_critico.csv",
+                    "text/csv",
+                    key="download_critico_confirm"
+                )
+        else:
+            st.success("Não há medicamentos com estoque crítico. Parabéns!")
     
-    # Análises gráficas
-    st.subheader("📈 Análise de Dados")
-    
-    tab1, tab2, tab3 = st.tabs(["Categorias", "Estoque", "Valor"])
-    
-    with tab1:
-        # Análise por categoria
-        if medicamentos:
-            # Converter para DataFrame para análise
-            df = pd.DataFrame([med.to_dict() for med in medicamentos])
-            
-            # Contagem por categoria
-            cat_count = df['categoria'].value_counts().reset_index()
-            cat_count.columns = ['Categoria', 'Quantidade']
-            
-            # Adiciona formatação para tooltips
-            cat_count['Qtd_Formatada'] = cat_count['Quantidade'].apply(formatar_numero)
-            
-            # Gráfico com Altair
-            chart = alt.Chart(cat_count).mark_bar().encode(
-                x=alt.X('Categoria:N', sort='-y'),
-                y='Quantidade:Q',
-                color=alt.Color('Categoria:N', legend=None),
-                tooltip=[
-                    alt.Tooltip('Categoria:N', title='Categoria'),
-                    alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
-                ]
-            ).properties(
-                title='Medicamentos por Categoria',
-                height=300
-            ).interactive()
-            
-            st.altair_chart(chart, use_container_width=True)
-    
-    with tab2:
-        # Distribuição de estoque
-        if medicamentos:
-            # Criar categorias de estoque
-            def categorizar_estoque(qtd):
-                if qtd < 5:
-                    return 'Crítico (<5)'
-                elif qtd < 10:
-                    return 'Baixo (5-9)'
-                elif qtd < 20:
-                    return 'Moderado (10-19)'
-                elif qtd < 50:
-                    return 'Bom (20-49)'
-                else:
-                    return 'Ótimo (50+)'
-            
-            df['estoque_cat'] = df['quantidade'].apply(categorizar_estoque)
-            estoque_dist = df['estoque_cat'].value_counts().reset_index()
-            estoque_dist.columns = ['Categoria', 'Quantidade']
-            
-            # Adiciona formatação para tooltips
-            estoque_dist['Qtd_Formatada'] = estoque_dist['Quantidade'].apply(formatar_numero)
-            
-            # Ordem personalizada para as categorias
-            ordem = ['Crítico (<5)', 'Baixo (5-9)', 'Moderado (10-19)', 'Bom (20-49)', 'Ótimo (50+)']
-            estoque_dist['Categoria'] = pd.Categorical(estoque_dist['Categoria'], 
-                                                     categories=ordem, 
-                                                     ordered=True)
-            estoque_dist = estoque_dist.sort_values('Categoria')
-            
-            # Cores para cada categoria
-            cores = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#27ae60']
-            
-            # Gráfico com Altair
-            chart = alt.Chart(estoque_dist).mark_bar().encode(
-                x=alt.X('Categoria:N', sort=ordem),
-                y='Quantidade:Q',
-                color=alt.Color('Categoria:N', scale=alt.Scale(domain=ordem, range=cores)),
-                tooltip=[
-                    alt.Tooltip('Categoria:N', title='Nível de Estoque'),
-                    alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
-                ]
-            ).properties(
-                title='Distribuição de Níveis de Estoque',
-                height=300
-            ).interactive()
-            
-            st.altair_chart(chart, use_container_width=True)
-    
-    with tab3:
-        # Valor por categoria
-        if medicamentos:
-            # Calcular valor total por categoria
-            df['valor_total'] = df['preco'] * df['quantidade']
-            valor_por_cat = df.groupby('categoria')['valor_total'].sum().reset_index()
-            valor_por_cat.columns = ['Categoria', 'Valor Total']
-            valor_por_cat = valor_por_cat.sort_values('Valor Total', ascending=False)
-            
-            # Adicionar formatação de moeda
-            valor_por_cat['Valor Formatado'] = valor_por_cat['Valor Total'].apply(formatar_moeda)
-            
-            # Gráfico com Altair
-            chart = alt.Chart(valor_por_cat).mark_bar().encode(
-                x=alt.X('Categoria:N', sort='-y'),
-                y=alt.Y('Valor Total:Q', axis=alt.Axis(format='~s', title='Valor Total (R$)')),
-                color=alt.Color('Categoria:N', legend=None),
-                tooltip=[
-                    alt.Tooltip('Categoria:N', title='Categoria'),
-                    alt.Tooltip('Valor Formatado:N', title='Valor em Estoque')
-                ]
-            ).properties(
-                title='Valor Total em Estoque por Categoria',
-                height=300
-            ).interactive()
-            
-            st.altair_chart(chart, use_container_width=True)
-    
-    # Medicamentos próximos da validade
-    st.subheader("📅 Medicamentos com Validade Próxima")
-    
-    hoje = datetime.now().date()
-    medicamentos_validade = []
-    
-    for med in medicamentos:
-        try:
-            data_validade = datetime.strptime(med.validade, "%Y-%m-%d").date()
-            dias_ate_vencer = (data_validade - hoje).days
-            
-            if dias_ate_vencer <= 90:  # Próximos 3 meses
-                medicamentos_validade.append({
-                    "Código": med.codigo,
-                    "Nome": med.nome,
-                    "Categoria": med.categoria,
-                    "Estoque": med.quantidade,
-                    "Validade": med.validade,
-                    "Dias até vencer": dias_ate_vencer
-                })
-        except:
-            pass
-    
-    if medicamentos_validade:
-        df_validade = pd.DataFrame(medicamentos_validade)
-        df_validade = df_validade.sort_values("Dias até vencer")
+    # Tab 2: Data Analysis
+    with dashboard_tabs[1]:
+        # Defer expensive chart creation until this tab is selected
+        st.subheader("📈 Análise de Dados")
         
-        # Destacar por proximidade do vencimento
-        def highlight_validade(val):
-            if isinstance(val, int):
-                if val < 0:
-                    return 'background-color: darkred; color: white'
-                elif val <= 30:
-                    return 'background-color: red; color: white'
-                elif val <= 60:
-                    return 'background-color: orange; color: black'
-                elif val <= 90:
-                    return 'background-color: yellow; color: black'
-            return ''
+        charts_tab1, charts_tab2, charts_tab3 = st.tabs(["Categorias", "Estoque", "Valor"])
+        
+        with charts_tab1:
+            # Análise por categoria - only if this tab is selected
+            if medicamentos:
+                with st.spinner("Gerando análise de categorias..."):
+                    # Process data efficiently - avoid creating multiple DataFrames
+                    categorias = {}
+                    for med in medicamentos:
+                        categorias[med.categoria] = categorias.get(med.categoria, 0) + 1
+                    
+                    cat_count = pd.DataFrame({
+                        'Categoria': list(categorias.keys()),
+                        'Quantidade': list(categorias.values())
+                    })
+                    cat_count = cat_count.sort_values('Quantidade', ascending=False)
+                    
+                    # Add formatted values for tooltips
+                    cat_count['Qtd_Formatada'] = cat_count['Quantidade'].apply(formatar_numero)
+                    
+                    # Create chart
+                    chart = alt.Chart(cat_count).mark_bar().encode(
+                        x=alt.X('Categoria:N', sort='-y'),
+                        y='Quantidade:Q',
+                        color=alt.Color('Categoria:N', legend=None),
+                        tooltip=[
+                            alt.Tooltip('Categoria:N', title='Categoria'),
+                            alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
+                        ]
+                    ).properties(
+                        title='Medicamentos por Categoria',
+                        height=300
+                    ).interactive()
+                    
+                    st.altair_chart(chart, use_container_width=True)
+        
+        with charts_tab2:
+            # Only calculate distribution if this tab is selected
+            if medicamentos:
+                with st.spinner("Analisando distribuição de estoque..."):
+                    # More efficient calculation
+                    estoque_categorias = {'Crítico (<5)': 0, 'Baixo (5-9)': 0, 
+                                         'Moderado (10-19)': 0, 'Bom (20-49)': 0, 'Ótimo (50+)': 0}
+                    
+                    for med in medicamentos:
+                        if med.quantidade < 5:
+                            estoque_categorias['Crítico (<5)'] += 1
+                        elif med.quantidade < 10:
+                            estoque_categorias['Baixo (5-9)'] += 1
+                        elif med.quantidade < 20:
+                            estoque_categorias['Moderado (10-19)'] += 1
+                        elif med.quantidade < 50:
+                            estoque_categorias['Bom (20-49)'] += 1
+                        else:
+                            estoque_categorias['Ótimo (50+)'] += 1
+                    
+                    # Create DataFrame directly from the counts
+                    ordem = ['Crítico (<5)', 'Baixo (5-9)', 'Moderado (10-19)', 'Bom (20-49)', 'Ótimo (50+)']
+                    estoque_dist = pd.DataFrame({
+                        'Categoria': ordem,
+                        'Quantidade': [estoque_categorias[cat] for cat in ordem],
+                    })
+                    
+                    # Add formatted values
+                    estoque_dist['Qtd_Formatada'] = estoque_dist['Quantidade'].apply(formatar_numero)
+                    
+                    # Colors for each category
+                    cores = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#27ae60']
+                    
+                    # Create chart
+                    chart = alt.Chart(estoque_dist).mark_bar().encode(
+                        x=alt.X('Categoria:N', sort=ordem),
+                        y='Quantidade:Q',
+                        color=alt.Color('Categoria:N', scale=alt.Scale(domain=ordem, range=cores)),
+                        tooltip=[
+                            alt.Tooltip('Categoria:N', title='Nível de Estoque'),
+                            alt.Tooltip('Qtd_Formatada:N', title='Quantidade')
+                        ]
+                    ).properties(
+                        title='Distribuição de Níveis de Estoque',
+                        height=300
+                    ).interactive()
+                    
+                    st.altair_chart(chart, use_container_width=True)
+        
+        with charts_tab3:
+            # Only calculate value analysis if this tab is selected
+            if medicamentos:
+                with st.spinner("Calculando valor por categoria..."):
+                    # More efficient calculation by category
+                    valor_por_cat_dict = {}
+                    for med in medicamentos:
+                        valor_item = med.preco * med.quantidade
+                        valor_por_cat_dict[med.categoria] = valor_por_cat_dict.get(med.categoria, 0) + valor_item
+                    
+                    # Convert to DataFrame
+                    valor_por_cat = pd.DataFrame({
+                        'Categoria': list(valor_por_cat_dict.keys()),
+                        'Valor Total': list(valor_por_cat_dict.values())
+                    }).sort_values('Valor Total', ascending=False)
+                    
+                    # Format for display
+                    valor_por_cat['Valor Formatado'] = valor_por_cat['Valor Total'].apply(formatar_moeda)
+                    
+                    # Create chart
+                    chart = alt.Chart(valor_por_cat).mark_bar().encode(
+                        x=alt.X('Categoria:N', sort='-y'),
+                        y=alt.Y('Valor Total:Q', axis=alt.Axis(format='~s', title='Valor Total (R$)')),
+                        color=alt.Color('Categoria:N', legend=None),
+                        tooltip=[
+                            alt.Tooltip('Categoria:N', title='Categoria'),
+                            alt.Tooltip('Valor Formatado:N', title='Valor em Estoque')
+                        ]
+                    ).properties(
+                        title='Valor Total em Estoque por Categoria',
+                        height=300
+                    ).interactive()
+                    
+                    st.altair_chart(chart, use_container_width=True)
+    
+    # Tab 3: Expiration dates
+    with dashboard_tabs[2]:
+        st.subheader("📅 Medicamentos com Validade Próxima")
+        
+        com st.container():
+            # Lazy load expiration data
+            with st.spinner("Verificando datas de validade..."):
+                hoje = datetime.now().date()
+                medicamentos_validade = []
+                
+                # Process all at once to avoid multiple loops
+                for med in medicamentos:
+                    try:
+                        data_validade = datetime.strptime(med.validade, "%Y-%m-%d").date()
+                        dias_ate_vencer = (data_validade - hoje).days
+                        
+                        if dias_ate_vencer <= 90:  # Next 3 months
+                            medicamentos_validade.append({
+                                "Código": med.codigo,
+                                "Nome": med.nome,
+                                "Categoria": med.categoria,
+                                "Estoque": med.quantidade,
+                                "Validade": med.validade,
+                                "Dias até vencer": dias_ate_vencer
+                            })
+                    except:
+                        pass
             
-        styled_df = df_validade.style.map(highlight_validade, subset=['Dias até vencer'])
-        st.dataframe(styled_df, use_container_width=True)
-    else:
-        st.info("Não há medicamentos com vencimento nos próximos 3 meses.")
+            if medicamentos_validade:
+                # Create DataFrame once
+                df_validade = pd.DataFrame(medicamentos_validade)
+                df_validade = df_validade.sort_values("Dias até vencer")
+                
+                # Highlight function
+                def highlight_validade(val):
+                    if isinstance(val, int):
+                        if val < 0:
+                            return 'background-color: darkred; color: white'
+                        elif val <= 30:
+                            return 'background-color: red; color: white'
+                        elif val <= 60:
+                            return 'background-color: orange; color: black'
+                        elif val <= 90:
+                            return 'background-color: yellow; color: black'
+                    return ''
+                
+                # Apply styling
+                styled_df = df_validade.style.map(highlight_validade, subset=['Dias até vencer'])
+                st.dataframe(styled_df, use_container_width=True)
+                
+                # Provide download option
+                if st.button("📥 Baixar Lista de Validade", key="download_validade"):
+                    csv = df_validade.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "Confirmar Download CSV",
+                        csv,
+                        "medicamentos_validade.csv",
+                        "text/csv",
+                        key="download_validade_confirm"
+                    )
+            else:
+                st.info("Não há medicamentos com vencimento nos próximos 3 meses.")
 
 
 def cadastrar_medicamento():
@@ -864,7 +934,6 @@ def gerenciar_estoque():
                 st.download_button(
                     "📥 Exportar Lista de Estoque Crítico",
                     csv,
-                    "estoque_critico.csv",
                     "text/csv",
                     key='download-csv-critico'
                 )
@@ -950,7 +1019,7 @@ def mostrar_visualizacao_arvore():
                 # Explicação dos fatores de balanceamento
                 with st.expander("📚 Sobre Fatores de Balanceamento"):
                     st.write("""
-                    O **Fator de Balanceamento (FB)** é a diferença entre a altura da subárvore esquerda e a altura da subárvore direita.
+                    O **Fator de Balanceamento (FB)** é a diferença entre a altura da subárvore esquerda e a subárvore direita.
                     
                     - **FB > 0**: A subárvore esquerda é mais alta
                     - **FB < 0**: A subárvore direita é mais alta
