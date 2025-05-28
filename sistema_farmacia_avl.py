@@ -4,6 +4,18 @@ import os
 import datetime
 from typing import List, Optional, Tuple, Dict
 import sys
+import locale
+import time
+import random
+
+# Configurar locale para formatação monetária adequada ao Brasil
+try:
+    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+except locale.Error:
+    try:
+        locale.setlocale(locale.LC_ALL, 'Portuguese_Brazil.1252')
+    except locale.Error:
+        pass  # Fallback para o locale padrão se não encontrar configuração brasileira
 
 
 class Medicamento:
@@ -613,8 +625,26 @@ def exibir_menu() -> None:
     print("10. Exportar dados para CSV")
     print("11. Importar dados de CSV")
     print("12. Estatísticas da árvore AVL")
+    print("13. Comparar tempos de busca (AVL vs Lista Encadeada)")
     print("0. Sair")
     print("="*60)
+
+
+def formatar_moeda(valor: float) -> str:
+    """Formata um valor monetário adequadamente."""
+    try:
+        # Tenta usar formatação localizada
+        return locale.currency(valor, grouping=True)
+    except:
+        # Fallback para formatação manual
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def calcular_percentual(parte: int, total: int) -> str:
+    """Calcula e formata o percentual."""
+    if total == 0:
+        return "0,0%"
+    return f"{(parte / total * 100):.1f}%".replace(".", ",")
 
 
 def ler_medicamento() -> Medicamento:
@@ -623,7 +653,21 @@ def ler_medicamento() -> Medicamento:
     codigo = int(input("Código: "))
     nome = input("Nome: ")
     categoria = input("Categoria: ")
-    preco = float(input("Preço (R$): "))
+    
+    # Validação de preço com formatação adequada
+    while True:
+        preco_str = input("Preço (R$): ")
+        try:
+            # Remove caracteres não numéricos e converte vírgula para ponto
+            preco_str = preco_str.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+            preco = float(preco_str)
+            if preco < 0:
+                print("O preço não pode ser negativo.")
+                continue
+            break
+        except ValueError:
+            print("Formato de preço inválido. Digite um valor numérico.")
+    
     quantidade = int(input("Quantidade em estoque: "))
     
     # Validação de data
@@ -650,7 +694,7 @@ def exibir_medicamento(med: Medicamento) -> None:
     print(f"Nome: {med.nome}")
     print(f"Categoria: {med.categoria}")
     print(f"Fabricante: {med.fabricante or 'Não informado'}")
-    print(f"Preço: R$ {med.preco:.2f}")
+    print(f"Preço: {formatar_moeda(med.preco)}")
     
     # Destaque para estoque crítico
     if med.quantidade < 5:
@@ -661,6 +705,10 @@ def exibir_medicamento(med: Medicamento) -> None:
         print(f"Estoque: {med.quantidade} unidades")
     
     print(f"Validade: {med.validade}")
+    
+    # Valor total deste item
+    valor_total = med.preco * med.quantidade
+    print(f"Valor total em estoque: {formatar_moeda(valor_total)}")
 
 
 def exibir_lista_medicamentos(medicamentos: List[Medicamento], titulo: str) -> None:
@@ -670,8 +718,8 @@ def exibir_lista_medicamentos(medicamentos: List[Medicamento], titulo: str) -> N
         return
     
     print(f"\n--- {titulo} ({len(medicamentos)}) ---")
-    print(f"{'Código':<8} {'Nome':<25} {'Categoria':<15} {'Preço (R$)':<10} {'Estoque':<10} {'Validade':<12}")
-    print("-" * 80)
+    print(f"{'Código':<8} {'Nome':<25} {'Categoria':<15} {'Preço':<15} {'Estoque':<10} {'Validade':<12}")
+    print("-" * 85)
     
     for med in medicamentos:
         nome_truncado = med.nome[:23] + ".." if len(med.nome) > 25 else med.nome
@@ -685,7 +733,9 @@ def exibir_lista_medicamentos(medicamentos: List[Medicamento], titulo: str) -> N
         else:
             estoque = str(med.quantidade)
         
-        print(f"{med.codigo:<8} {nome_truncado:<25} {categoria_truncada:<15} {med.preco:<10.2f} {estoque:<10} {med.validade:<12}")
+        preco_formatado = formatar_moeda(med.preco)
+        
+        print(f"{med.codigo:<8} {nome_truncado:<25} {categoria_truncada:<15} {preco_formatado:<15} {estoque:<10} {med.validade:<12}")
 
 
 def exibir_estatisticas_arvore(sistema: ArvoreAVL) -> None:
@@ -701,24 +751,144 @@ def exibir_estatisticas_arvore(sistema: ArvoreAVL) -> None:
         total_estoque = sum(med.quantidade for med in medicamentos)
         valor_total = sum(med.preco * med.quantidade for med in medicamentos)
         estoque_baixo = len(sistema.listar_estoque_baixo(10))
+        estoque_critico = len(sistema.listar_estoque_baixo(5))
         
         print(f"\nTotal de itens em estoque: {total_estoque} unidades")
-        print(f"Valor total em estoque: R$ {valor_total:.2f}")
+        print(f"Valor total em estoque: {formatar_moeda(valor_total)}")
         print(f"Medicamentos com estoque baixo (<10): {estoque_baixo}")
+        print(f"Medicamentos com estoque crítico (<5): {estoque_critico}")
         
-        # Contagem por categoria
+        # Contagem e análise por categoria
         categorias = {}
+        valor_por_categoria = {}
+        estoque_por_categoria = {}
+        
         for med in medicamentos:
             categorias[med.categoria] = categorias.get(med.categoria, 0) + 1
+            valor_por_categoria[med.categoria] = valor_por_categoria.get(med.categoria, 0) + (med.preco * med.quantidade)
+            estoque_por_categoria[med.categoria] = estoque_por_categoria.get(med.categoria, 0) + med.quantidade
         
-        print("\nMedicamentos por categoria:")
-        for cat, count in sorted(categorias.items(), key=lambda x: x[1], reverse=True):
-            print(f"  {cat}: {count}")
+        print("\n--- Análise por Categoria ---")
+        print(f"{'Categoria':<20} {'Qtd. Itens':<10} {'%':<6} {'Unidades':<10} {'%':<6} {'Valor em Estoque':<20}")
+        print("-" * 75)
+        
+        # Ordenar categorias pelo valor total em estoque (decrescente)
+        categorias_ordenadas = sorted(categorias.keys(), key=lambda c: valor_por_categoria[c], reverse=True)
+        
+        for categoria in categorias_ordenadas:
+            qtd_itens = categorias[categoria]
+            qtd_unidades = estoque_por_categoria[categoria]
+            valor_cat = valor_por_categoria[categoria]
+            
+            perc_itens = calcular_percentual(qtd_itens, len(medicamentos))
+            perc_unidades = calcular_percentual(qtd_unidades, total_estoque)
+            
+            print(f"{categoria[:19]:<20} {qtd_itens:<10} {perc_itens:<6} "
+                  f"{qtd_unidades:<10} {perc_unidades:<6} {formatar_moeda(valor_cat):<20}")
+        
+        print("-" * 75)
+        print(f"{'TOTAL':<20} {len(medicamentos):<10} {'100%':<6} "
+              f"{total_estoque:<10} {'100%':<6} {formatar_moeda(valor_total):<20}")
 
 
 def pausar() -> None:
     """Pausa a execução até que o usuário pressione Enter."""
     input("\nPressione Enter para continuar...")
+
+
+def simular_busca_lista_encadeada(medicamentos: List[Medicamento], codigo: int) -> Tuple[Optional[Medicamento], float]:
+    """
+    Simula a busca em uma lista encadeada (complexidade O(n)).
+    
+    Args:
+        medicamentos: Lista de medicamentos
+        codigo: Código do medicamento a ser buscado
+        
+    Returns:
+        Tuple[Optional[Medicamento], float]: O medicamento encontrado (ou None) e o tempo de busca
+    """
+    inicio = time.time()
+    
+    resultado = None
+    # Percorre a lista sequencialmente (simulando uma lista encadeada)
+    for med in medicamentos:
+        if med.codigo == codigo:
+            resultado = med
+            break
+    
+    fim = time.time()
+    tempo = (fim - inicio) * 1000  # Tempo em milissegundos
+    
+    return resultado, tempo
+
+
+def comparar_tempos_busca(sistema: ArvoreAVL) -> None:
+    """Compara os tempos de busca entre árvore AVL e uma lista encadeada simulada."""
+    # Obtém todos os medicamentos
+    medicamentos = sistema.listar_todos()
+    total = len(medicamentos)
+    
+    if total == 0:
+        print("\nNão há medicamentos cadastrados para realizar a comparação.")
+        return
+    
+    print("\n--- Comparação de Tempos de Busca: AVL vs Lista Encadeada ---")
+    print(f"Total de medicamentos: {total}")
+    
+    # Prepara a tabela de resultados
+    print("\n{:<15} {:<20} {:<20} {:<15}".format("Caso", "Tempo AVL (ms)", "Tempo Lista (ms)", "Diferença (x)"))
+    print("-" * 75)
+    
+    # Casos de teste
+    casos = [
+        ("Melhor caso", medicamentos[0].codigo),  # Primeiro elemento (raiz da árvore)
+        ("Pior caso", medicamentos[-1].codigo),   # Último elemento
+        ("Caso médio", medicamentos[len(medicamentos)//2].codigo)  # Elemento do meio
+    ]
+    
+    # Código aleatório dentro do intervalo existente
+    if total > 3:
+        codigos = [med.codigo for med in medicamentos]
+        random_idx = random.randint(0, total-1)
+        casos.append(("Caso aleatório", medicamentos[random_idx].codigo))
+    
+    # Código inexistente (sempre maior que todos os existentes)
+    codigo_inexistente = max([med.codigo for med in medicamentos]) + 1000
+    casos.append(("Inexistente", codigo_inexistente))
+    
+    # Realizando as buscas
+    for caso, codigo in casos:
+        # Tempo na AVL
+        inicio = time.time()
+        resultado_avl = sistema.buscar(codigo)
+        fim = time.time()
+        tempo_avl = (fim - inicio) * 1000  # Tempo em milissegundos
+        
+        # Tempo na lista encadeada simulada
+        _, tempo_lista = simular_busca_lista_encadeada(medicamentos, codigo)
+        
+        # Calcula a diferença (quantas vezes a lista é mais lenta)
+        if tempo_avl > 0:
+            diferenca = tempo_lista / tempo_avl
+        else:
+            diferenca = "N/A"
+        
+        # Formata e exibe os resultados
+        print("{:<15} {:<20.6f} {:<20.6f} {:<15.2f}".format(caso, tempo_avl, tempo_lista, diferenca if diferenca != "N/A" else 0))
+    
+    # Conclusão teórica
+    print("\n--- Análise de Complexidade ---")
+    print(f"Para {total} medicamentos:")
+    print(f"• Árvore AVL:      O(log n) ≈ {(2.3 * (total.bit_length() - 1)):.1f} comparações no pior caso")
+    print(f"• Lista Encadeada:  O(n)     = {total} comparações no pior caso")
+    print("\nA diferença teórica é de {:.1f}x em favor da AVL para este volume de dados.".format(
+          total / (2.3 * (total.bit_length() - 1)) if total > 1 else 1))
+    
+    print("\nObservações:")
+    print("• A AVL mantém tempos de busca muito mais estáveis mesmo com grandes volumes de dados")
+    print("• Com 1.000 medicamentos, a lista encadeada pode ser até 100x mais lenta no pior caso")
+    print("• Para 1 milhão de medicamentos, a diferença pode chegar a 50.000x")
+    print("• Além da busca rápida, a AVL também mantém os dados organizados (ordenados)")
 
 
 def main_cli() -> None:
@@ -883,6 +1053,10 @@ def main_cli() -> None:
             
             elif opcao == "12":  # Estatísticas
                 exibir_estatisticas_arvore(sistema)
+                pausar()
+            
+            elif opcao == "13":  # Comparar tempos de busca
+                comparar_tempos_busca(sistema)
                 pausar()
             
             else:
